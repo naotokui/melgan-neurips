@@ -19,7 +19,7 @@ def parse_args():
     parser.add_argument("--save_path", required=True)
     parser.add_argument("--load_path", default=None)
 
-    parser.add_argument("--n_mel_channels", type=int, default=80)
+    parser.add_argument("--n_mel_channels", type=int, default=64)
     parser.add_argument("--ngf", type=int, default=32)
     parser.add_argument("--n_residual_layers", type=int, default=3)
 
@@ -38,6 +38,7 @@ def parse_args():
     parser.add_argument("--log_interval", type=int, default=100)
     parser.add_argument("--save_interval", type=int, default=1000)
     parser.add_argument("--n_test_samples", type=int, default=8)
+
     args = parser.parse_args()
     return args
 
@@ -63,7 +64,15 @@ def main():
     netD = Discriminator(
         args.num_D, args.ndf, args.n_layers_D, args.downsamp_factor
     ).cuda()
-    fft = Audio2Mel(n_mel_channels=args.n_mel_channels).cuda()
+
+    n_fft = 1024
+    hop_length = 160 
+    win_length = 1024
+    sampling_rate = 16000
+    n_mel_channels = 64 
+    
+    fft = Audio2Mel(n_fft, hop_length, win_length, sampling_rate, n_mel_channels).cuda()
+#    fft = Audio2Mel(n_mel_channels=args.n_mel_channels).cuda()
 
     print(netG)
     print(netD)
@@ -84,12 +93,12 @@ def main():
     # Create data loaders #
     #######################
     train_set = AudioDataset(
-        Path(args.data_path) / "train_files.txt", args.seq_len, sampling_rate=16000
+        Path(args.data_path) / "train_files.txt", args.seq_len, sampling_rate=sampling_rate
     )
     test_set = AudioDataset(
         Path(args.data_path) / "test_files.txt",
-        16000 * 4,
-        sampling_rate=16000,
+        sampling_rate * 4,
+        sampling_rate=sampling_rate,
         augment=False,
     )
 
@@ -109,8 +118,8 @@ def main():
         test_audio.append(x_t)
 
         audio = x_t.squeeze().cpu()
-        save_sample(root / ("original_%d.wav" % i), 16000, audio)
-        writer.add_audio("original/sample_%d.wav" % i, audio, 0, sample_rate=16000)
+        save_sample(root / ("original_%d.wav" % i), sampling_rate, audio)
+        writer.add_audio("original/sample_%d.wav" % i, audio, 0, sample_rate=sampling_rate)
 
         if i == args.n_test_samples - 1:
             break
@@ -165,7 +174,8 @@ def main():
             wt = D_weights * feat_weights
             for i in range(args.num_D):
                 for j in range(len(D_fake[i]) - 1):
-                    loss_feat += wt * F.l1_loss(D_fake[i][j], D_real[i][j].detach())
+                    size_ = D_fake[i][j].shape[2]
+                    loss_feat += wt * F.l1_loss(D_fake[i][j], D_real[i][j][:,:,:size_].detach())
 
             netG.zero_grad()
             (loss_G + args.lambda_feat * loss_feat).backward()
@@ -188,12 +198,12 @@ def main():
                     for i, (voc, _) in enumerate(zip(test_voc, test_audio)):
                         pred_audio = netG(voc)
                         pred_audio = pred_audio.squeeze().cpu()
-                        save_sample(root / ("generated_%d.wav" % i), 16000, pred_audio)
+                        save_sample(root / ("generated_%d.wav" % i), sampling_rate, pred_audio)
                         writer.add_audio(
                             "generated/sample_%d.wav" % i,
                             pred_audio,
                             epoch,
-                            sample_rate=22050,
+                            sample_rate=sampling_rate,
                         )
 
                 torch.save(netG.state_dict(), root / "netG.pt")
